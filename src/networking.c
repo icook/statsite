@@ -135,6 +135,7 @@ static int setup_tcp_listener(statsite_networking *netconf) {
     int tcp_listener_fd;
     int optval = 1;
     char tcp_port[MAX_PORT_LEN];
+    char addrstr[100];
 
     memset(&hints, 0, sizeof(struct addrinfo));
     hints.ai_family = AF_UNSPEC;    /* Allow IPv4 or IPv6 */
@@ -161,27 +162,18 @@ static int setup_tcp_listener(statsite_networking *netconf) {
             close(tcp_listener_fd);
             continue;
         }
-        if (bind(tcp_listener_fd, rp->ai_addr, rp->ai_addrlen) == 0)
-            break;
-        syslog(LOG_ERR, "Failed to bind on TCP socket! Err: %s", strerror(errno));
-        close(tcp_listener_fd);
+        inet_ntop(rp->ai_family, rp->ai_addr->sa_data, addrstr, 100);
+        if (bind(tcp_listener_fd, rp->ai_addr, rp->ai_addrlen) != 0) {
+            syslog(LOG_ERR, "Failed to bind on TCP socket %s! Err: %s", addrstr, strerror(errno));
+            close(tcp_listener_fd);
+            return 1;
+        } else {
+            syslog(LOG_INFO, "Listening on tcp '%s'", addrstr);
+            // Create the libev objects
+            ev_io_init(&netconf->tcp_client, handle_new_client,
+                    tcp_listener_fd, EV_READ);
+        }
     }
-    if (rp == NULL) {               /* No address succeeded */
-        syslog(LOG_ERR, "Failed to bind on any TCP socket!\n");
-        return 1;
-    }
-    if (listen(tcp_listener_fd, BACKLOG_SIZE) != 0) {
-        syslog(LOG_ERR, "Failed to listen on TCP socket! Err: %s", strerror(errno));
-        close(tcp_listener_fd);
-        return 1;
-    }
-
-    syslog(LOG_INFO, "Listening on tcp '%s:%d'",
-           netconf->config->bind_address, netconf->config->tcp_port);
-
-    // Create the libev objects
-    ev_io_init(&netconf->tcp_client, handle_new_client,
-                tcp_listener_fd, EV_READ);
     ev_io_start(&netconf->tcp_client);
     return 0;
 }
